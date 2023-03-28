@@ -15,24 +15,17 @@ private:
     std::queue<T> q; // no other data structures are allowed
     std::mutex m;
     std::condition_variable cv;
-    // extend as needed
 public:
     void push(T value)
     {
-        // synchronization needed?
         m.lock();
         q.push(value);
         m.unlock();
         cv.notify_one();
-
     }
+
     void pop(T &value)
     {
-        // todo:
-        // in a thread-safe way take the front element
-        // and pop it from the queue
-        // multiple consumers may be accessing this method
-
         // if not empty, remove the element from the queue
         m.lock();
         if (!q.empty())
@@ -45,11 +38,6 @@ public:
 
     T wait_and_pop()
     {
-        // todo:
-        // in a thread-safe way take the front element
-        // and pop it from the queue
-        // multiple consumers may be accessing this method
-
         std::unique_lock lock(m);
         cv.wait(lock, [this]{ return !q.empty(); });
         const int value = q.front();
@@ -59,13 +47,13 @@ public:
 
     size_t size()
     {
-        std::unique_lock lock(m, std::defer_lock);
+        std::unique_lock lock(m);
         return q.size();
     }
 
     bool empty()
     {
-        std::unique_lock lock(m, std::defer_lock);
+        std::unique_lock lock(m);
         return q.empty();
     }
 };
@@ -157,7 +145,6 @@ void worker(SafeQ<int> &q, int &primes, int &nonprimes, double &sum, int &consum
             metrics_mutex.unlock();
         }
     }
-
 }
 
 int main(int argc, char **argv)
@@ -168,9 +155,9 @@ int main(int argc, char **argv)
     parse_args(argc, argv, num_threads, filename, no_exec_times, only_exec_times);
 
     // The actual code
-    int primes = 0, nonprimes = 0, count = 0;
+    int primes, nonprimes = 0;
     int consumed_count = 0;
-    double mean = 0.0, sum = 0.0;
+    double mean, sum = 0.0;
 
     // vector for storing numbers ending with different digits (0-9)
     std::vector<int> number_counts(10, 0);

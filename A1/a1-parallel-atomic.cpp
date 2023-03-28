@@ -15,40 +15,40 @@ private:
     std::queue<T> q; // no other data structures are allowed
     std::mutex m;
     std::condition_variable cv;
-    // extend as needed
 public:
     void push(T value)
     {
-        // synchronization needed?
         m.lock();
         q.push(value);
         m.unlock();
         cv.notify_one();
-
     }
+
     void pop(T &value)
     {
-        // todo:
-        // in a thread-safe way take the front element
-        // and pop it from the queue
-        // multiple consumers may be accessing this method
-
         // if not empty, remove the element from the queue
         std::unique_lock<std::mutex> lock(m);
-        if (!q.empty()) {
+        if (!q.empty())
+        {
             value = q.front();
             q.pop();
         }
     }
 
+    bool try_pop(T &value)
+    {
+        std::unique_lock<std::mutex> lock(m);
+        if (q.empty()) {
+            return false;
+        }
+        value = q.front();
+        q.pop();
+        return true;
+    }
+
     T wait_and_pop()
     {
-        // todo:
-        // in a thread-safe way take the front element
-        // and pop it from the queue
-        // multiple consumers may be accessing this method
-
-        std::unique_lock<std::mutex> lock(m);
+        std::unique_lock lock(m);
         cv.wait(lock, [this]{ return !q.empty(); });
         const int value = q.front();
         q.pop();
@@ -57,18 +57,18 @@ public:
 
     size_t size()
     {
-        std::unique_lock<std::mutex> lock(m, std::defer_lock);
+        std::unique_lock lock(m);
         return q.size();
     }
 
     bool empty()
     {
-        std::unique_lock<std::mutex> lock(m, std::defer_lock);
+        std::unique_lock lock(m);
         return q.empty();
     }
 };
 
-std::atomic<bool> producer_finished = false;
+std::atomic_flag producer_finished_flag = ATOMIC_FLAG_INIT;
 
 /**
  * To be executed by the master thread
@@ -95,7 +95,7 @@ int producer(const std::string& filename, SafeQ<int> &q)
         produced_count++;
     }
 
-    producer_finished.store(true);
+    producer_finished_flag.test_and_set(std::memory_order_relaxed);
 
     ifs.close();
 
@@ -117,7 +117,7 @@ int producer(const std::string& filename, SafeQ<int> &q)
  *
 */
 void worker(SafeQ<int> &q, std::atomic<int> &primes, std::atomic<int> &nonprimes, std::atomic<double> &sum,
-            std::atomic<int> &consumed_count, std::vector<int> &number_counts)
+            std::atomic<int> &consumed_count, std::vector<std::atomic<int>> &number_counts)
 {
     // implement: use synchronization
     // Note: This part may need some rearranging and rewriting
@@ -125,40 +125,42 @@ void worker(SafeQ<int> &q, std::atomic<int> &primes, std::atomic<int> &nonprimes
     // it has to now wait until the next element can be popped,
     // or it has to terminate if producer has finished and the queue is empty.
 
-    for(;;)
-    {
-        int num = q.wait_and_pop();
-        std::cout << num << std::endl;
-        if (producer_finished.load() && q.empty()) {
-            break;
+    for (;;) {
+        int num;
+        if (!q.try_pop(num)) {
+            if (producer_finished_flag.test(std::memory_order_relaxed)) {
+                break;
+            }
+            else {
+                std::this_thread::yield();
+                continue;
+            }
         }
 
         const bool is_prime = kernel(num) == 1;
 
-        consumed_count++;
-        number_counts[num % 10]++;
-
-        // sum += num;
-
-        if (is_prime) primes++;
-        else nonprimes++;
+        if (is_prime) primes.fetch_add(1, std::memory_order_relaxed);
+        else nonprimes.fetch_add(1, std::memory_order_relaxed);
+        consumed_count.fetch_add(1, std::memory_order_relaxed);
+        sum.fetch_add(num, std::memory_order_relaxed);
+        number_counts[num % 10].fetch_add(1, std::memory_order_relaxed);
     }
 }
 
 int main(int argc, char **argv)
 {
-    int num_threads = 10; // you can change this default to thread::hardware_concurrency()
+    int num_threads = (int) std::thread::hardware_concurrency(); // you can change this default to thread::hardware_concurrency()
     bool no_exec_times = false, only_exec_times = false;; // reporting of time measurements
     std::string filename = "input.txt";
     parse_args(argc, argv, num_threads, filename, no_exec_times, only_exec_times);
 
     // The actual code
-    std::atomic<int> primes = 0, nonprimes = 0, count = 0;
+    std::atomic<int> primes, nonprimes = 0;
     std::atomic<int> consumed_count = 0;
-    std::atomic<double> mean = 0.0, sum = 0.0;
+    std::atomic<double> mean, sum = 0.0;
 
     // vector for storing numbers ending with different digits (0-9)
-    std::vector<int> number_counts(10, 0);
+    std::vector<std::atomic<int>> number_counts(10);
 
     // Queue that needs to be made safe
     // In the simple form it takes integers
@@ -195,8 +197,14 @@ int main(int argc, char **argv)
         std::cout << "[error]: produced_count (" << produced_count << ") != consumed_count (" << consumed_count << ")." << std::endl;
     }
 
+    std::vector<int> number_counts_non_atomic;
+
+    for (auto &a: number_counts) {
+        number_counts_non_atomic.push_back(a.load(std::memory_order_relaxed));
+    }
+
     // priting the results
-    print_output(num_threads, primes, nonprimes, mean, number_counts, t1, t2, only_exec_times, no_exec_times);
+    print_output(num_threads, primes, nonprimes, mean,number_counts_non_atomic, t1, t2, only_exec_times, no_exec_times);
 
     return 0;
 }
