@@ -149,7 +149,7 @@ void worker(SafeQ<int> &q, int &primes, int &nonprimes, double &sum, int &consum
 
 int main(int argc, char **argv)
 {
-    int num_threads = 10; // you can change this default to thread::hardware_concurrency()
+    int num_threads = 1; // you can change this default to thread::hardware_concurrency()
     bool no_exec_times = false, only_exec_times = false;; // reporting of time measurements
     std::string filename = "input.txt";
     parse_args(argc, argv, num_threads, filename, no_exec_times, only_exec_times);
