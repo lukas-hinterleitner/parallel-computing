@@ -7,7 +7,7 @@ fi
 
 echo "start compiling..";
 
-/opt/global/gcc-11.2.0/bin/g++ -O2 -lpthread -std=c++20 -o a1-parallel-"$1" a1-parallel-"$1".cpp || echo "compiling failed"; exit 1;
+/opt/global/gcc-11.2.0/bin/g++ -O2 -lpthread -std=c++20 -o a1-parallel-"$1" a1-parallel-"$1".cpp || exit 1;
 
 echo "compiling finished";
 echo "=============================================="
