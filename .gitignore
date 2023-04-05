@@ -31,7 +31,8 @@
 *.out
 *.app
 
-a*[^.]*
+a**
+!a**.*
 
 .idea
 cmake-build-debug
