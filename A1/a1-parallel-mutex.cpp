@@ -134,16 +134,14 @@ void worker(SafeQ<int> &q, int &primes, int &nonprimes, double &sum, int &consum
 
         const bool is_prime = kernel(num) == 1;
 
-        {
-            metrics_mutex.lock();
-            consumed_count++;
-            number_counts[num % 10]++;
-            sum += num;
+        metrics_mutex.lock();
+        consumed_count++;
+        number_counts[num % 10]++;
+        sum += num;
 
-            if (is_prime) primes++;
-            else nonprimes++;
-            metrics_mutex.unlock();
-        }
+        if (is_prime) primes++;
+        else nonprimes++;
+        metrics_mutex.unlock();
     }
 }
 

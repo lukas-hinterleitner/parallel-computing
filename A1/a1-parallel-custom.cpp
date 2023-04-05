@@ -126,6 +126,8 @@ int producer(const std::string& filename, SafeQ<int> &q)
     return produced_count;
 }
 
+SafeCache<int, bool> prime_cache;
+
 /**
  * To be executed by worker threads
  * The function removes a number from the queue "q"
@@ -140,10 +142,6 @@ int producer(const std::string& filename, SafeQ<int> &q)
  * @param[inout] number_counts
  *
 */
-
-// worker cache for storing prime numbers
-SafeCache<int, bool> prime_cache;
-
 void worker(SafeQ<int> &q, std::atomic<int> &primes, std::atomic<int> &nonprimes, std::atomic<double> &sum,
             std::atomic<int> &consumed_count, std::vector<std::atomic<int>> &number_counts)
 {

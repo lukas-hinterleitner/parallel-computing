@@ -34,6 +34,8 @@
 a**
 !a**.*
 
+.~lock.*
+
 .idea
 cmake-build-debug
 CMakeLists.txt
