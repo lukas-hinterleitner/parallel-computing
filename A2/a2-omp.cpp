@@ -2,6 +2,7 @@
 #include <iomanip>
 #include <chrono>
 #include <cmath>
+#include "omp.h"
 
 #include "a2-helpers.hpp"
 
@@ -26,7 +27,7 @@ int main(int argc, char **argv)
 
     // START: the main part of the code that needs to use MPI/OpenMP timing routines 
     //  MPI hint: remember to initialize MPI first 
-    
+
     int i, j;
     double diffnorm;
     int iteration_count = 0;
@@ -34,6 +35,7 @@ int main(int argc, char **argv)
     Mat U(M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
     Mat W(M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
 
+    #pragma omp parallel for private(i, j)
     // Init & Boundary
     for (i = 0; i < M; ++i) {
         for (j = 0; j < N; ++j) {
@@ -44,6 +46,7 @@ int main(int argc, char **argv)
         W[i][N-1] = U[i][N-1] = 0.1; // right side
     }
 
+    #pragma omp parallel for private(j)
     for (j = 0; j < N; ++j) {
         W[0][j] = U[0][j] = 0.02; // top 
         W[M - 1][j] = U[M - 1][j] = 0.2; // bottom 
@@ -56,6 +59,7 @@ int main(int argc, char **argv)
         iteration_count++;
         diffnorm = 0.0;
 
+        #pragma omp parallel for reduction(+:diffnorm) private(i, j)
         // Compute new values (but not on boundary) 
         for (i = 1; i < M - 1; ++i)
         {
@@ -66,6 +70,7 @@ int main(int argc, char **argv)
             }
         }
 
+        #pragma omp parallel for private(i, j)
         // Only transfer the interior points
         for (i = 1; i < M - 1; ++i)
             for (j = 1; j < N - 1; ++j)
