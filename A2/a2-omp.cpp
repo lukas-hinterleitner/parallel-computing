@@ -28,17 +28,17 @@ int main(int argc, char **argv)
     // START: the main part of the code that needs to use MPI/OpenMP timing routines 
     //  MPI hint: remember to initialize MPI first 
 
-    int i, j;
+
     double diffnorm;
     int iteration_count = 0;
 
     Mat U(M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
     Mat W(M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
 
-    #pragma omp parallel for private(i, j)
+    #pragma omp parallel for
     // Init & Boundary
-    for (i = 0; i < M; ++i) {
-        for (j = 0; j < N; ++j) {
+    for (int i = 0; i < M; ++i) {
+        for (int j = 0; j < N; ++j) {
             W[i][j] = U[i][j] = 0.0;
         }
 
@@ -46,8 +46,8 @@ int main(int argc, char **argv)
         W[i][N-1] = U[i][N-1] = 0.1; // right side
     }
 
-    #pragma omp parallel for private(j)
-    for (j = 0; j < N; ++j) {
+    #pragma omp parallel for
+    for (int j = 0; j < N; ++j) {
         W[0][j] = U[0][j] = 0.02; // top 
         W[M - 1][j] = U[M - 1][j] = 0.2; // bottom 
     }
@@ -59,21 +59,21 @@ int main(int argc, char **argv)
         iteration_count++;
         diffnorm = 0.0;
 
-        #pragma omp parallel for reduction(+:diffnorm) private(i, j)
+        #pragma omp parallel for reduction(+:diffnorm)
         // Compute new values (but not on boundary) 
-        for (i = 1; i < M - 1; ++i)
+        for (int i = 1; i < M - 1; ++i)
         {
-            for (j = 1; j < N - 1; ++j)
+            for (int j = 1; j < N - 1; ++j)
             {
                 W[i][j] = (U[i][j + 1] + U[i][j - 1] + U[i + 1][j] + U[i - 1][j]) * 0.25;
                 diffnorm += (W[i][j] - U[i][j]) * (W[i][j] - U[i][j]);
             }
         }
 
-        #pragma omp parallel for private(i, j)
+        #pragma omp parallel for
         // Only transfer the interior points
-        for (i = 1; i < M - 1; ++i)
-            for (j = 1; j < N - 1; ++j)
+        for (int i = 1; i < M - 1; ++i)
+            for (int j = 1; j < N - 1; ++j)
                 U[i][j] = W[i][j];
 
         diffnorm = sqrt(diffnorm); // all processes need to know when to stop

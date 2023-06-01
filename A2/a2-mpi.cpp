@@ -2,6 +2,7 @@
 #include <iomanip>
 #include <chrono>
 #include <cmath>
+#include "mpi/mpi.h"
 
 #include "a2-helpers.hpp"
 
@@ -19,10 +20,16 @@ int main(int argc, char **argv)
 
     process_input(argc, argv, N, M, max_iterations, epsilon, verify, print_config);
 
+    int numprocs, rank;
+    MPI_Init(&argc, &argv);
+
+    MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
     if ( print_config )
         std::cout << "Configuration: m: " << M << ", n: " << N << ", max-iterations: " << max_iterations << ", epsilon: " << epsilon << std::endl;
 
-    auto time_1 = chrono::high_resolution_clock::now(); // change to MPI_Wtime() / omp_get_wtime()
+    auto time_mpi_1 = MPI_Wtime();
 
     // START: the main part of the code that needs to use MPI/OpenMP timing routines 
     //  MPI hint: remember to initialize MPI first 
@@ -33,6 +40,7 @@ int main(int argc, char **argv)
 
     Mat U(M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
     Mat W(M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
+
 
     // Init & Boundary
     for (i = 0; i < M; ++i) {
@@ -74,15 +82,15 @@ int main(int argc, char **argv)
         diffnorm = sqrt(diffnorm); // all processes need to know when to stop
         
     } while (epsilon <= diffnorm && iteration_count < max_iterations);
-    
-    auto time_2 = chrono::high_resolution_clock::now(); // change to MPI_Wtime() / omp_get_wtime()
+
+    auto time_mpi_2 = MPI_Wtime(); // change to MPI_Wtime() / omp_get_wtime()
 
     // TODO for MPI: collect all local parts of the U matrix, and save it to another "big" matrix
-    // that has the same size the whole size: like bigU(M,N) 
+    // that has the same size the whole size: like bigU(M,N)
 
     // Print time measurements 
     cout << "Elapsed time: "; 
-    cout << std::fixed << std::setprecision(4) << chrono::duration<double>(time_2 - time_1).count(); // remove for MPI/OpenMP
+    cout << std::fixed << std::setprecision(4) << chrono::duration<double>(time_mpi_2 - time_mpi_1).count(); // remove for MPI/OpenMP
     // cout << std::fixed << std::setprecision(4) << (time_2 - time_1); // modify accordingly for MPI/OpenMP
     cout << " seconds, iterations: " << iteration_count << endl; 
  
@@ -98,6 +106,7 @@ int main(int argc, char **argv)
     }
 
     // MPI: do not forget to call MPI_Finalize()
+    MPI_Finalize();
     
     // U.save_to_disk("heat2d.txt"); // not needed
 
