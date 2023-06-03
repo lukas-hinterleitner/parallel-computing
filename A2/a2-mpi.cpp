@@ -67,8 +67,8 @@ int main(int argc, char **argv)
     }
 
     for (j = 0; j < N; ++j) {
-        W[0][j] = U[0][j] = 0.02; // top
-        W[local_M - 1][j] = U[local_M - 1][j] = 0.2; // bottom
+        W[1][j] = U[1][j] = 0.02; // top
+        W[local_M - 2][j] = U[local_M - 2][j] = 0.2; // bottom
     }
     // End init
 
