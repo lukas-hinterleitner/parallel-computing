@@ -45,19 +45,13 @@ int main(int argc, char **argv)
     int iteration_count = 0;
 
     // change M to local size for horizontal fragmentation
-    int old_M = M;
-    int local_M = M / numprocs + 2; // +2 for padding rows
-
-    // from and to are the indices for each data chunk
-    int from = rank * M;
-    // make last process handle remaining rows
-    int to = (rank == numprocs - 1) ? old_M - 1 : from + (M - 1);
+    int local_M = (M / numprocs) + 2; // +2 for padding rows
 
     Mat U(local_M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
     Mat W(local_M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
 
     // Init & Boundary
-    for (i = 0; i < local_M; ++i) {
+    for (i = 1; i < local_M - 2; ++i) {
         for (j = 0; j < N; ++j) {
             W[i][j] = U[i][j] = 0.0;
         }
@@ -66,10 +60,18 @@ int main(int argc, char **argv)
         W[i][N-1] = U[i][N-1] = 0.1; // right side
     }
 
-    for (j = 0; j < N; ++j) {
-        W[1][j] = U[1][j] = 0.02; // top
-        W[local_M - 2][j] = U[local_M - 2][j] = 0.2; // bottom
+    if (rank == 0) {
+        for (j = 0; j < N; ++j) {
+            W[1][j] = U[1][j] = 0.02; // top
+        }
     }
+
+    if (rank == (numprocs - 1)) {
+        for (j = 0; j < N; ++j) {
+            W[local_M - 2][j] = U[local_M - 2][j] = 0.2; // bottom
+        }
+    }
+
     // End init
 
     MPI_Request request_upwards, request_downwards;
@@ -82,7 +84,7 @@ int main(int argc, char **argv)
         diffnorm = 0.0;
 
         // Compute new values (but not on boundary) 
-        for (i = 1; i < local_M - 1; ++i)
+        for (i = 1; i < local_M - 2; ++i)
         {
             for (j = 1; j < N - 1; ++j)
             {
@@ -92,19 +94,17 @@ int main(int argc, char **argv)
         }
 
         // Only transfer the interior points
-        for (i = 1; i < local_M - 1; ++i)
+        for (i = 1; i < local_M - 2; ++i)
             for (j = 1; j < N - 1; ++j)
                 U[i][j] = W[i][j];
 
         diffnorm = sqrt(diffnorm); // all processes need to know when to stop
 
-        if (rank == 0) {
-            //std::cout << "Iteration: " << iteration_count << ", diffnorm: " << diffnorm << ", Epsilon: " << epsilon << std::endl;
-        }
-
+        /*
         if (epsilon >= diffnorm) {
             cout << "Rank: " << rank << ", Iteration: " << iteration_count << ", diffnorm: " << diffnorm << ", Epsilon: " << epsilon << endl;
         }
+        */
 
         if (rank != (numprocs - 1)) {
             // receive from below
@@ -118,7 +118,6 @@ int main(int argc, char **argv)
             //MPI_Recv(U[local_M-1], N, MPI_DOUBLE, rank + 1, UPWARDS_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
 
-        // send bottom row downwards for all chunks except the last one
         if (rank != 0) {
             // receive from above
             // send upwards
@@ -147,7 +146,8 @@ int main(int argc, char **argv)
     // gather all local parts of the final_local_U matrix for rank 0
     MPI_Gather(&final_local_U(0, 0), (local_M - 2) * N, MPI_DOUBLE, &bigU(0, 0), (local_M - 2) * N, MPI_DOUBLE, 0, WORLD);
 
-    if (rank != 0){
+    // only continue program when rank is 0
+    if (rank != 0) {
         MPI_Finalize();
         return 0;
     }
