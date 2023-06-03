@@ -6,6 +6,12 @@
 
 #include "a2-helpers.hpp"
 
+// tags that indicate if we send data upwards or downwards
+#define UPWARDS_TAG 1
+#define DOWNWARDS_TAG 2
+
+#define WORLD MPI_COMM_WORLD
+
 using namespace std;
 
 int main(int argc, char **argv)
@@ -23,8 +29,8 @@ int main(int argc, char **argv)
     int numprocs, rank;
     MPI_Init(&argc, &argv);
 
-    MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(WORLD, &numprocs);
+    MPI_Comm_rank(WORLD, &rank);
 
     if ( print_config )
         std::cout << "Configuration: m: " << M << ", n: " << N << ", max-iterations: " << max_iterations << ", epsilon: " << epsilon << std::endl;
@@ -61,16 +67,13 @@ int main(int argc, char **argv)
     }
 
     for (j = 0; j < N; ++j) {
-        W[0][j] = U[0][j] = 0.02; // top 
+        W[0][j] = U[0][j] = 0.02; // top
         W[local_M - 1][j] = U[local_M - 1][j] = 0.2; // bottom
     }
     // End init
 
-    const int send_upwards_tag = 1;
-    const int send_downwards_tag = 2;
-
-    MPI_Request request_send_upwards, request_send_downwards;
-    MPI_Status  status_send_upwards, status_send_downwards;
+    MPI_Request request_upwards, request_downwards;
+    MPI_Status  status_upwards, status_downwards;
 
     iteration_count = 0;
     do
@@ -78,28 +81,12 @@ int main(int argc, char **argv)
         iteration_count++;
         diffnorm = 0.0;
 
-        if (rank != (numprocs - 1)) {
-            MPI_Isend(U[local_M-2], N, MPI_DOUBLE, rank + 1, send_downwards_tag, MPI_COMM_WORLD, &request_send_downwards);
-            MPI_Recv(U[local_M-1], N, MPI_DOUBLE, rank + 1, send_upwards_tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-            MPI_Wait(&request_send_downwards, &status_send_downwards);
-        }
-
-        // send bottom row downwards for all chunks except the last one
-        if (rank != 0) {
-            MPI_Isend(U[1], N, MPI_DOUBLE, rank - 1, send_upwards_tag, MPI_COMM_WORLD, &request_send_upwards);
-            MPI_Recv(U[0], N, MPI_DOUBLE, rank - 1, send_downwards_tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-            MPI_Wait(&request_send_upwards, &status_send_upwards);
-        }
-
         // Compute new values (but not on boundary) 
         for (i = 1; i < local_M - 1; ++i)
         {
             for (j = 1; j < N - 1; ++j)
             {
                 W[i][j] = (U[i][j + 1] + U[i][j - 1] + U[i + 1][j] + U[i - 1][j]) * 0.25;
-
                 diffnorm += (W[i][j] - U[i][j]) * (W[i][j] - U[i][j]);
             }
         }
@@ -111,6 +98,38 @@ int main(int argc, char **argv)
 
         diffnorm = sqrt(diffnorm); // all processes need to know when to stop
 
+        if (rank == 0) {
+            //std::cout << "Iteration: " << iteration_count << ", diffnorm: " << diffnorm << ", Epsilon: " << epsilon << std::endl;
+        }
+
+        if (epsilon >= diffnorm) {
+            cout << "Rank: " << rank << ", Iteration: " << iteration_count << ", diffnorm: " << diffnorm << ", Epsilon: " << epsilon << endl;
+        }
+
+        if (rank != (numprocs - 1)) {
+            // receive from below
+            // send downwards
+
+            MPI_Irecv(U[local_M-1], N, MPI_DOUBLE, rank + 1, UPWARDS_TAG, WORLD, &request_upwards);
+            MPI_Send(U[local_M-2], N, MPI_DOUBLE, rank + 1, DOWNWARDS_TAG, WORLD);
+            MPI_Wait(&request_upwards, &status_upwards);
+
+            //MPI_Isend(U[local_M-2], N, MPI_DOUBLE, rank + 1, DOWNWARDS_TAG, MPI_COMM_WORLD, &request_downwards);
+            //MPI_Recv(U[local_M-1], N, MPI_DOUBLE, rank + 1, UPWARDS_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        // send bottom row downwards for all chunks except the last one
+        if (rank != 0) {
+            // receive from above
+            // send upwards
+
+            MPI_Irecv(U[0], N, MPI_DOUBLE, rank - 1, DOWNWARDS_TAG, WORLD, &request_downwards);
+            MPI_Send(U[1], N, MPI_DOUBLE, rank - 1, UPWARDS_TAG, WORLD);
+            MPI_Wait(&request_downwards, &status_downwards);
+
+            //MPI_Isend(U[1], N, MPI_DOUBLE, rank - 1, UPWARDS_TAG, MPI_COMM_WORLD, &request_upwards);
+            //MPI_Irecv(U[0], N, MPI_DOUBLE, rank - 1, DOWNWARDS_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
     } while (epsilon <= diffnorm && iteration_count < max_iterations);
 
     Mat final_local_U(local_M - 2, N);
@@ -122,18 +141,18 @@ int main(int argc, char **argv)
         }
     }
 
-    auto time_mpi_2 = MPI_Wtime(); // change to MPI_Wtime() / omp_get_wtime()
-
     // final matrix
     Mat bigU(M, N);
 
     // gather all local parts of the final_local_U matrix for rank 0
-    MPI_Gather(&final_local_U(0, 0), (local_M - 2) * N, MPI_DOUBLE, &bigU(0, 0), (local_M - 2) * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Gather(&final_local_U(0, 0), (local_M - 2) * N, MPI_DOUBLE, &bigU(0, 0), (local_M - 2) * N, MPI_DOUBLE, 0, WORLD);
 
     if (rank != 0){
         MPI_Finalize();
         return 0;
     }
+
+    auto time_mpi_2 = MPI_Wtime(); // change to MPI_Wtime() / omp_get_wtime()
 
     // Print time measurements 
     cout << "Elapsed time: "; 
