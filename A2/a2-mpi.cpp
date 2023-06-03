@@ -38,12 +38,20 @@ int main(int argc, char **argv)
     double diffnorm;
     int iteration_count = 0;
 
-    Mat U(M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
-    Mat W(M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
+    // change M to local size for horizontal fragmentation
+    int old_M = M;
+    int local_M = M / numprocs + 2; // +2 for padding rows
 
+    // from and to are the indices for each data chunk
+    int from = rank * M;
+    // make last process handle remaining rows
+    int to = (rank == numprocs - 1) ? old_M - 1 : from + (M - 1);
+
+    Mat U(local_M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
+    Mat W(local_M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
 
     // Init & Boundary
-    for (i = 0; i < M; ++i) {
+    for (i = 0; i < local_M; ++i) {
         for (j = 0; j < N; ++j) {
             W[i][j] = U[i][j] = 0.0;
         }
@@ -54,9 +62,15 @@ int main(int argc, char **argv)
 
     for (j = 0; j < N; ++j) {
         W[0][j] = U[0][j] = 0.02; // top 
-        W[M - 1][j] = U[M - 1][j] = 0.2; // bottom 
+        W[local_M - 1][j] = U[local_M - 1][j] = 0.2; // bottom
     }
     // End init
+
+    const int send_upwards_tag = 1;
+    const int send_downwards_tag = 2;
+
+    MPI_Request request_send_upwards, request_send_downwards;
+    MPI_Status  status_send_upwards, status_send_downwards;
 
     iteration_count = 0;
     do
@@ -64,29 +78,62 @@ int main(int argc, char **argv)
         iteration_count++;
         diffnorm = 0.0;
 
+        if (rank != (numprocs - 1)) {
+            MPI_Isend(U[local_M-2], N, MPI_DOUBLE, rank + 1, send_downwards_tag, MPI_COMM_WORLD, &request_send_downwards);
+            MPI_Recv(U[local_M-1], N, MPI_DOUBLE, rank + 1, send_upwards_tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            MPI_Wait(&request_send_downwards, &status_send_downwards);
+        }
+
+        // send bottom row downwards for all chunks except the last one
+        if (rank != 0) {
+            MPI_Isend(U[1], N, MPI_DOUBLE, rank - 1, send_upwards_tag, MPI_COMM_WORLD, &request_send_upwards);
+            MPI_Recv(U[0], N, MPI_DOUBLE, rank - 1, send_downwards_tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            MPI_Wait(&request_send_upwards, &status_send_upwards);
+        }
+
         // Compute new values (but not on boundary) 
-        for (i = 1; i < M - 1; ++i)
+        for (i = 1; i < local_M - 1; ++i)
         {
             for (j = 1; j < N - 1; ++j)
             {
                 W[i][j] = (U[i][j + 1] + U[i][j - 1] + U[i + 1][j] + U[i - 1][j]) * 0.25;
+
                 diffnorm += (W[i][j] - U[i][j]) * (W[i][j] - U[i][j]);
             }
         }
 
         // Only transfer the interior points
-        for (i = 1; i < M - 1; ++i)
+        for (i = 1; i < local_M - 1; ++i)
             for (j = 1; j < N - 1; ++j)
                 U[i][j] = W[i][j];
 
         diffnorm = sqrt(diffnorm); // all processes need to know when to stop
-        
+
     } while (epsilon <= diffnorm && iteration_count < max_iterations);
+
+    Mat final_local_U(local_M - 2, N);
+
+    // copy local U matrix to final_local_U matrix without boundary rows
+    for (i = 0; i < local_M - 2; ++i) {
+        for (j = 0; j < N; ++j) {
+            final_local_U[i][j] = U[i + 1][j];
+        }
+    }
 
     auto time_mpi_2 = MPI_Wtime(); // change to MPI_Wtime() / omp_get_wtime()
 
-    // TODO for MPI: collect all local parts of the U matrix, and save it to another "big" matrix
-    // that has the same size the whole size: like bigU(M,N)
+    // final matrix
+    Mat bigU(M, N);
+
+    // gather all local parts of the final_local_U matrix for rank 0
+    MPI_Gather(&final_local_U(0, 0), (local_M - 2) * N, MPI_DOUBLE, &bigU(0, 0), (local_M - 2) * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    if (rank != 0){
+        MPI_Finalize();
+        return 0;
+    }
 
     // Print time measurements 
     cout << "Elapsed time: "; 
@@ -105,10 +152,7 @@ int main(int argc, char **argv)
         cout << "Verification: " << ( U.compare(U_sequential) && iteration_count == iteration_count_seq ? "OK" : "NOT OK") << std::endl;
     }
 
-    // MPI: do not forget to call MPI_Finalize()
     MPI_Finalize();
-    
-    // U.save_to_disk("heat2d.txt"); // not needed
 
     return 0;
 }
