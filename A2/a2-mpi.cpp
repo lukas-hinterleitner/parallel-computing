@@ -35,16 +35,14 @@ int main(int argc, char **argv)
     if ( print_config )
         std::cout << "Configuration: m: " << M << ", n: " << N << ", max-iterations: " << max_iterations << ", epsilon: " << epsilon << std::endl;
 
-    auto time_mpi_1 = MPI_Wtime();
+    const auto time_mpi_1 = MPI_Wtime();
 
     // change M to local size for horizontal fragmentation
     int local_M = M / numprocs;
 
     // if M is not divisible by numprocs, the last process will have more rows
-    if (M % numprocs != 0) {
-        if (rank == (numprocs - 1)) {
-            local_M = M - (local_M * (numprocs - 1));
-        }
+    if (M % numprocs != 0 && rank == (numprocs - 1)) {
+        local_M = M - (local_M * (numprocs - 1));
     }
 
     local_M += 2; // add padding rows
@@ -79,8 +77,8 @@ int main(int argc, char **argv)
     }
     // End init
 
-    MPI_Request request_upwards[numprocs], request_downwards[numprocs];
-    MPI_Status  status_upwards[numprocs], status_downwards[numprocs];
+    MPI_Request request_upwards, request_downwards;
+    MPI_Status  status_upwards, status_downwards;
 
     double diffnorm;
     double global_diffnorm;
@@ -89,7 +87,7 @@ int main(int argc, char **argv)
     int start_M = 1;
     int end_M = local_M - 1;
 
-    // Only compute interior points --> skip padding rows and boundary rows
+    // Only compute interior points --> skip padding rows
     if (rank == 0) {
         start_M = 2;
     }
@@ -110,15 +108,12 @@ int main(int argc, char **argv)
             // send upwards
 
             // save row from above in top padding row
-            MPI_Irecv(&U[0][0], N, MPI_DOUBLE, rank - 1, DOWNWARDS_TAG, WORLD, &request_downwards[rank]);
+            MPI_Irecv(&U[0][0], N, MPI_DOUBLE, rank - 1, DOWNWARDS_TAG, WORLD, &request_downwards);
 
             // send first row to above process (not the padding row)
             MPI_Send(&U[1][0], N, MPI_DOUBLE, rank - 1, UPWARDS_TAG, WORLD);
 
-            MPI_Wait(&request_downwards[rank], &status_downwards[rank]);
-
-            //MPI_Isend(U[1], N, MPI_DOUBLE, rank - 1, UPWARDS_TAG, MPI_COMM_WORLD, &request_upwards);
-            //MPI_Irecv(U[0], N, MPI_DOUBLE, rank - 1, DOWNWARDS_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Wait(&request_downwards, &status_downwards);
         }
 
         // all processes except last one
@@ -127,18 +122,15 @@ int main(int argc, char **argv)
             // send downwards
 
             // save row from below in bottom padding row
-            MPI_Irecv(&U[local_M-1][0], N, MPI_DOUBLE, rank + 1, UPWARDS_TAG, WORLD, &request_upwards[rank]);
+            MPI_Irecv(&U[local_M-1][0], N, MPI_DOUBLE, rank + 1, UPWARDS_TAG, WORLD, &request_upwards);
 
             // send last row to below process (not the padding row)
             MPI_Send(&U[local_M-2][0], N, MPI_DOUBLE, rank + 1, DOWNWARDS_TAG, WORLD);
 
-            MPI_Wait(&request_upwards[rank], &status_upwards[rank]);
-
-            //MPI_Isend(U[local_M-2], N, MPI_DOUBLE, rank + 1, DOWNWARDS_TAG, MPI_COMM_WORLD, &request_downwards);
-            //MPI_Recv(U[local_M-1], N, MPI_DOUBLE, rank + 1, UPWARDS_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Wait(&request_upwards, &status_upwards);
         }
 
-        // Compute new values (but not on boundary) 
+        // Compute new values (but not on boundary)
         for (i = start_M; i < end_M; ++i){
             for (j = 1; j < N - 1; ++j)
             {
@@ -147,29 +139,14 @@ int main(int argc, char **argv)
             }
         }
 
-        // since matrix is initialized differently on some processes, we need to sum up all diffnorms so that each process has the same stopping criterion
-        MPI_Allreduce(&diffnorm, &global_diffnorm, 1, MPI_DOUBLE, MPI_SUM, WORLD);
-
         // Only transfer the interior points
         for (i = start_M; i < end_M; ++i)
             for (j = 1; j < N - 1; ++j)
                 U[i][j] = W[i][j];
 
-        global_diffnorm = sqrt(global_diffnorm); // all processes need to know when to stop
-
-    } while (epsilon <= global_diffnorm && iteration_count < max_iterations);
-
-    Mat final_local_U(local_M - 2, N);
-
-    // copy local U matrix to final_local_U matrix without boundary rows
-    for (i = 0; i < local_M - 2; ++i) {
-        for (j = 0; j < N; ++j) {
-            final_local_U[i][j] = U[i + 1][j];
-        }
-    }
-
-    // final matrix
-    Mat bigU(M, N);
+        // since matrix is initialized differently on some processes, we need to sum up all diffnorms so that each process has the same stopping criterion
+        MPI_Allreduce(&diffnorm, &global_diffnorm, 1, MPI_DOUBLE, MPI_SUM, WORLD);
+    } while (epsilon <= sqrt(global_diffnorm) && iteration_count < max_iterations);
 
     // setup receive counts and displacements for MPI_Gatherv
     int receive_counts[numprocs];
@@ -181,8 +158,13 @@ int main(int argc, char **argv)
     }
     receive_counts[numprocs-1] += (M % numprocs) * N;
 
-    // gather all local parts of the final_local_U matrix for rank 0
-    MPI_Gatherv(&final_local_U(0, 0), (local_M - 2) * N, MPI_DOUBLE, &bigU(0, 0), receive_counts, receive_displs, MPI_DOUBLE, 0, WORLD);
+    // final matrix
+    Mat bigU(M, N);
+
+    // gather all local parts of the local matrix without the boundary rows to rank 0
+    MPI_Gatherv(&U(1, 0), (local_M - 2) * N, MPI_DOUBLE, &bigU(0, 0), receive_counts, receive_displs, MPI_DOUBLE, 0, WORLD);
+
+    const auto time_mpi_2 = MPI_Wtime(); // change to MPI_Wtime() / omp_get_wtime()
 
     // only continue program when rank is 0
     if (rank != 0) {
@@ -190,14 +172,12 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    const auto time_mpi_2 = MPI_Wtime(); // change to MPI_Wtime() / omp_get_wtime()
-
-    // Print time measurements 
-    cout << "Elapsed time: "; 
+    // Print time measurements
+    cout << "Elapsed time: ";
     cout << std::fixed << std::setprecision(4) << chrono::duration<double>(time_mpi_2 - time_mpi_1).count(); // remove for MPI/OpenMP
     // cout << std::fixed << std::setprecision(4) << (time_2 - time_1); // modify accordingly for MPI/OpenMP
-    cout << " seconds, iterations: " << iteration_count << endl; 
- 
+    cout << " seconds, iterations: " << iteration_count << endl;
+
     // verification     
     if ( verify ) {
         Mat U_sequential(M, N); // init another matrix for the verification

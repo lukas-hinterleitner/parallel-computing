@@ -21,7 +21,7 @@ plt.figure(figsize=(15, 8))
 
 plt.subplot(2, 1, 1)
 plt.grid()
-plt.title("omp speedup")
+plt.title("OMP speedup")
 plt.xlabel("number of threads")
 plt.ylabel("speedup")
 plt.xticks(np.arange(1, 33))
@@ -33,7 +33,7 @@ for filename in omp_execution_time_files:
 
 plt.legend()
 plt.subplot(2, 1, 2)
-plt.title("mpi speedup")
+plt.title("MPI speedup")
 plt.xlabel("configuration (nodes, threads)")
 plt.ylabel("speedup")
 plt.grid()
