@@ -33,16 +33,17 @@ for filename in omp_execution_time_files:
 
 plt.legend()
 plt.subplot(2, 1, 2)
+plt.title("mpi speedup")
+plt.xlabel("configuration (nodes, threads)")
+plt.ylabel("speedup")
+plt.grid()
 for filename in mpi_execution_time_files:
     df = pd.read_csv(filename)
 
-    plt.title("mpi speedup")
-    plt.xlabel("number of threads")
-    plt.ylabel("speedup")
-    plt.xticks()
-    plt.grid()
+    x_ticks = ("(" + df["num_nodes"].astype("str") + ", " + df["num_thread"].astype("str")) + ")"
 
-    plt.plot(df["num_thread"], df["execution-time"].iloc[0] / df["execution-time"])
+    plt.plot(x_ticks, df["execution-time"].iloc[0] / df["execution-time"], label=get_arguments_from_filename(filename))
 
+plt.legend()
 plt.tight_layout()
 plt.savefig("speedup.png")

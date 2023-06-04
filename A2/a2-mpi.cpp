@@ -86,6 +86,18 @@ int main(int argc, char **argv)
     double global_diffnorm;
     int iteration_count = 0;
 
+    int start_M = 1;
+    int end_M = local_M - 1;
+
+    // Only compute interior points --> skip padding rows and boundary rows
+    if (rank == 0) {
+        start_M = 2;
+    }
+
+    if (rank == (numprocs - 1)) {
+        end_M = local_M - 2;
+    }
+
     do
     {
         iteration_count++;
@@ -126,16 +138,6 @@ int main(int argc, char **argv)
             //MPI_Recv(U[local_M-1], N, MPI_DOUBLE, rank + 1, UPWARDS_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
 
-        int start_M = 1;
-        int end_M = local_M - 1;
-
-        // Only compute interior points --> skip padding rows
-        if (rank == 0) {
-            start_M = 2;
-        } else if (rank == (numprocs - 1)) {
-            end_M = local_M - 2;
-        }
-
         // Compute new values (but not on boundary) 
         for (i = start_M; i < end_M; ++i){
             for (j = 1; j < N - 1; ++j)
@@ -154,8 +156,6 @@ int main(int argc, char **argv)
                 U[i][j] = W[i][j];
 
         global_diffnorm = sqrt(global_diffnorm); // all processes need to know when to stop
-
-        //cout << "Rank: " << rank << ", Iteration: " << iteration_count << ", diffnorm: " << diffnorm << ", Epsilon: " << epsilon << ", Global diffnorm: " << global_diffnorm << endl;
 
     } while (epsilon <= global_diffnorm && iteration_count < max_iterations);
 
@@ -190,7 +190,7 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    auto time_mpi_2 = MPI_Wtime(); // change to MPI_Wtime() / omp_get_wtime()
+    const auto time_mpi_2 = MPI_Wtime(); // change to MPI_Wtime() / omp_get_wtime()
 
     // Print time measurements 
     cout << "Elapsed time: "; 
