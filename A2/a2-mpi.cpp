@@ -36,14 +36,23 @@ int main(int argc, char **argv)
         std::cout << "Configuration: m: " << M << ", n: " << N << ", max-iterations: " << max_iterations << ", epsilon: " << epsilon << std::endl;
 
     auto time_mpi_1 = MPI_Wtime();
-    
-    int i, j;
 
     // change M to local size for horizontal fragmentation
-    int local_M = (M / numprocs) + 2; // +2 for padding rows
+    int local_M = M / numprocs;
+
+    // if M is not divisible by numprocs, the last process will have more rows
+    if (M % numprocs != 0) {
+        if (rank == (numprocs - 1)) {
+            local_M = M - (local_M * (numprocs - 1));
+        }
+    }
+
+    local_M += 2; // add padding rows
 
     Mat U(local_M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
     Mat W(local_M, N); // for MPI: use local sizes with MPI, e.g., recalculate M and N
+
+    int i, j;
 
     // Init & Boundary
     for (i = 1; i < local_M - 1; ++i) {
@@ -162,8 +171,18 @@ int main(int argc, char **argv)
     // final matrix
     Mat bigU(M, N);
 
+    // setup receive counts and displacements for MPI_Gatherv
+    int receive_counts[numprocs];
+    int receive_displs[numprocs];
+
+    for (i = 0; i < numprocs; ++i) {
+        receive_counts[i] = (local_M - 2) * N;
+        receive_displs[i] = i * (local_M - 2) * N;
+    }
+    receive_counts[numprocs-1] += (M % numprocs) * N;
+
     // gather all local parts of the final_local_U matrix for rank 0
-    MPI_Gather(&final_local_U(0, 0), (local_M - 2) * N, MPI_DOUBLE, &bigU(0, 0), (local_M - 2) * N, MPI_DOUBLE, 0, WORLD);
+    MPI_Gatherv(&final_local_U(0, 0), (local_M - 2) * N, MPI_DOUBLE, &bigU(0, 0), receive_counts, receive_displs, MPI_DOUBLE, 0, WORLD);
 
     // only continue program when rank is 0
     if (rank != 0) {
