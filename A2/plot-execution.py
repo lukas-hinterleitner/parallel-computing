@@ -34,7 +34,7 @@ for filename in omp_execution_time_files:
 plt.legend()
 plt.subplot(2, 1, 2)
 plt.title("MPI speedup")
-plt.xlabel("configuration (nodes, threads)")
+plt.xlabel("configuration (nodes, processes)")
 plt.ylabel("speedup")
 plt.grid()
 for filename in mpi_execution_time_files:
