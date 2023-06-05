@@ -117,16 +117,6 @@ int main(int argc, char **argv)
             MPI_Wait(&request_downwards, &status_downwards);
         }
 
-        if (rank == 0) {
-            // save row from below in bottom padding row
-            MPI_Irecv(&U[local_M-1][0], N, MPI_DOUBLE, rank_below, UPWARDS_TAG, WORLD, &request_upwards);
-
-            // send last row to below process (not the padding row)
-            MPI_Send(&U[local_M-2][0], N, MPI_DOUBLE, rank_below, DOWNWARDS_TAG, WORLD);
-
-            MPI_Wait(&request_upwards, &status_upwards);
-        }
-
         if (rank > 0 && rank < (numprocs - 1)) {
             // save row from below in bottom padding row
             MPI_Irecv(&U[local_M-1][0], N, MPI_DOUBLE, rank_below, UPWARDS_TAG, WORLD, &request_upwards);
@@ -142,6 +132,16 @@ int main(int argc, char **argv)
 
             MPI_Wait(&request_upwards, &status_upwards);
             MPI_Wait(&request_downwards, &status_downwards);
+        }
+
+        if (rank == 0) {
+            // save row from below in bottom padding row
+            MPI_Irecv(&U[local_M-1][0], N, MPI_DOUBLE, rank_below, UPWARDS_TAG, WORLD, &request_upwards);
+
+            // send last row to below process (not the padding row)
+            MPI_Send(&U[local_M-2][0], N, MPI_DOUBLE, rank_below, DOWNWARDS_TAG, WORLD);
+
+            MPI_Wait(&request_upwards, &status_upwards);
         }
 
         // Compute new values (but not on boundary)
