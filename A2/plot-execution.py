@@ -27,7 +27,7 @@ plt.ylabel("speedup")
 plt.xticks(np.arange(1, 33))
 plt.yticks(np.arange(1, 20))
 
-for filename in omp_execution_time_files:
+for filename in sorted(omp_execution_time_files):
     df = pd.read_csv(filename)
     plt.plot(df["num_thread"], df["execution-time"].iloc[0] / df["execution-time"], label=get_arguments_from_filename(filename))
 
@@ -37,7 +37,7 @@ plt.title("MPI speedup")
 plt.xlabel("configuration (nodes, processes)")
 plt.ylabel("speedup")
 plt.grid()
-for filename in mpi_execution_time_files:
+for filename in sorted(mpi_execution_time_files):
     df = pd.read_csv(filename)
 
     x_ticks = ("(" + df["num_nodes"].astype("str") + ", " + df["num_thread"].astype("str")) + ")"
