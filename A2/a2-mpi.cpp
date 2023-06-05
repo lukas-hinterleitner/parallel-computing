@@ -96,38 +96,52 @@ int main(int argc, char **argv)
         end_M = local_M - 2;
     }
 
+    const bool only_one_process = numprocs == 1;
+
+    const int rank_above = only_one_process ? rank : rank - 1;
+    const int rank_below = only_one_process ? rank : rank + 1;
+
     do
     {
         iteration_count++;
         diffnorm = 0.0;
         global_diffnorm = 0.0;
 
-        // all processes except first one
-        if (rank != 0) {
-            // receive from above
-            // send upwards
-
+        if (rank == (numprocs - 1)) {
             // save row from above in top padding row
-            MPI_Irecv(&U[0][0], N, MPI_DOUBLE, rank - 1, DOWNWARDS_TAG, WORLD, &request_downwards);
+            MPI_Irecv(&U[0][0], N, MPI_DOUBLE, rank_above, DOWNWARDS_TAG, WORLD, &request_downwards);
 
             // send first row to above process (not the padding row)
-            MPI_Send(&U[1][0], N, MPI_DOUBLE, rank - 1, UPWARDS_TAG, WORLD);
+            MPI_Send(&U[1][0], N, MPI_DOUBLE, rank_above, UPWARDS_TAG, WORLD);
 
             MPI_Wait(&request_downwards, &status_downwards);
         }
 
-        // all processes except last one
-        if (rank != (numprocs - 1)) {
-            // receive from below
-            // send downwards
-
+        if (rank == 0) {
             // save row from below in bottom padding row
-            MPI_Irecv(&U[local_M-1][0], N, MPI_DOUBLE, rank + 1, UPWARDS_TAG, WORLD, &request_upwards);
+            MPI_Irecv(&U[local_M-1][0], N, MPI_DOUBLE, rank_below, UPWARDS_TAG, WORLD, &request_upwards);
 
             // send last row to below process (not the padding row)
-            MPI_Send(&U[local_M-2][0], N, MPI_DOUBLE, rank + 1, DOWNWARDS_TAG, WORLD);
+            MPI_Send(&U[local_M-2][0], N, MPI_DOUBLE, rank_below, DOWNWARDS_TAG, WORLD);
 
             MPI_Wait(&request_upwards, &status_upwards);
+        }
+
+        if (rank > 0 && rank < (numprocs - 1)) {
+            // save row from below in bottom padding row
+            MPI_Irecv(&U[local_M-1][0], N, MPI_DOUBLE, rank_below, UPWARDS_TAG, WORLD, &request_upwards);
+
+            // save row from above in top padding row
+            MPI_Irecv(&U[0][0], N, MPI_DOUBLE, rank_above, DOWNWARDS_TAG, WORLD, &request_downwards);
+
+            // send last row to below process (not the padding row)
+            MPI_Send(&U[local_M-2][0], N, MPI_DOUBLE, rank_below, DOWNWARDS_TAG, WORLD);
+
+            // send first row to above process (not the padding row)
+            MPI_Send(&U[1][0], N, MPI_DOUBLE, rank_above, UPWARDS_TAG, WORLD);
+
+            MPI_Wait(&request_upwards, &status_upwards);
+            MPI_Wait(&request_downwards, &status_downwards);
         }
 
         // Compute new values (but not on boundary)
